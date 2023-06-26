@@ -1,0 +1,116 @@
+consumers:
+  - username: docker
+    plugins:
+      basic-auth: 
+        username: docker
+        password: $(docker_password)
+upstreams:
+  - id: 100000
+    type: roundrobin
+    service_name: docker-registry/docker-registry:http
+    discovery_type: kubernetes
+  - id: 200000
+    retries: 5
+    hash_on: vars_combinations
+    key: $http_user_agent$remote_addr
+    type: chash
+    scheme: http
+    timeout:
+      connect: 120
+      read: 900
+      send: 900
+    service_name: httpbin-headless.httpbin.svc.cluster.local:80
+    discovery_type: dns
+  - id: 300000
+    type: roundrobin
+    nodes:
+      - host: keycloak.keycloak.svc.cluster.local
+        port: 8080
+        weight: 1
+  - id: 400000
+    retries: 5
+    hash_on: vars_combinations
+    key: $http_user_agent$remote_addr
+    type: chash
+    scheme: http
+    timeout:
+      connect: 120
+      read: 900
+      send: 900
+    service_name: secure-coding-exercises/secure-coding-exercises:http
+    discovery_type: kubernetes
+routes:
+  - id: 500000
+    name: route-docker
+    upstream_id: 100000
+    hosts:
+      - docker.example.com
+    uris:
+      - /*
+    plugins:
+      basic-auth:
+        hide_credentials: true
+  - id: 600000
+    name: route-keycloak
+    upstream_id: 300000
+    hosts:
+      - auth.example.com
+    uris:
+      - /js/* 
+      - /realms/*
+      - /resources/*
+      - /robots.txt
+  - id: 700000
+    name: route-secure-coding-exercises
+    upstream_id: 400000
+    hosts:
+      - secure-coding-exercises.example.com
+      - secure-code-exercises.example.com
+    uris:
+      - /*
+    plugins:
+      real-ip:
+        source: http_x_forwarded_for
+        trusted_addresses:
+          - 192.168.0.0/16
+      limit-req:
+        burst: 10
+        key: remote_addr
+        key_type: var
+        rate: 5
+        rejected_code: 503
+  - id: 800000
+    name: route-httpbin
+    upstream_id: 200000
+    hosts:
+      - httpbin.example.com
+    uris:
+      - /*
+    plugins:
+      real-ip:
+        source: http_x_forwarded_for
+        trusted_addresses:
+          - 192.168.0.0/16
+      limit-req:
+        burst: 10
+        key: remote_addr
+        key_type: var
+        rate: 5
+        rejected_code: 503
+      openid-connect:
+        client_id: httpbin
+        client_secret: $(openid_connect_secret)
+        discovery: http://keycloak.keycloak.svc.cluster.local:8080/realms/std/.well-known/openid-configuration
+        realm: std
+        redirect_uri: /oidc-callback
+        session:
+          # Without this you constantly get "request to the redirect_uri path but there's no session state found"
+          secret: $(openid_connect_session_secret)
+global_rules:
+  - id: 1
+    plugins:
+      response-rewrite:
+        headers:
+          server: ""
+
+#END
